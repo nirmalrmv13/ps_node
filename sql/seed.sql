@@ -47,3 +47,9 @@ INSERT INTO employees (employee_code, name, designation, phone, email, joining_d
   ('EMP003', 'Anjali Nair', 'Beautician', '9876500003', 'anjali@prosignature.in', '2024-06-01', 8.00),
   ('EMP004', 'Meera Das', 'Spa Therapist', '9876500004', NULL, '2025-02-20', 7.50)
 ON DUPLICATE KEY UPDATE id = id;
+
+INSERT INTO membership_plans (name, description, price, duration_days, discount_percent) VALUES
+  ('Silver Membership', '10% off every service for 3 months.', 1500.00, 90, 10.00),
+  ('Gold Membership', '15% off every service for a full year.', 4000.00, 365, 15.00),
+  ('Platinum Membership', '25% off every service for a full year.', 7500.00, 365, 25.00)
+ON DUPLICATE KEY UPDATE id = id;

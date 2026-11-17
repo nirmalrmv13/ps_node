@@ -199,3 +199,6 @@ router.put('/:id/status', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.INACTIVE_STATUSES = INACTIVE_STATUSES;
+module.exports.scheduleBooking = scheduleBooking;
+module.exports.findAppointment = findAppointment;

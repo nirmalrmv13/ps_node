@@ -1,3 +1,5 @@
+const fs = require('node:fs');
+const path = require('node:path');
 const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
@@ -14,12 +16,31 @@ const customersRouter = require('./routes/customers');
 const { STARS_FOR_FREE } = require('./loyalty');
 const { closesAt, opensAt, toClock } = require('./salonHours');
 const invoicesRouter = require('./routes/invoices');
+const membershipPlansRouter = require('./routes/membershipPlans');
+const suppliersRouter = require('./routes/suppliers');
+const purchasesRouter = require('./routes/purchases');
+const reportsRouter = require('./routes/reports');
+const landingImagesRouter = require('./routes/landingImages');
+const landingUploadRouter = require('./routes/landingUpload');
+const publicBookingRouter = require('./routes/publicBooking');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors({ origin: process.env.CORS_ORIGIN }));
+const clientDir = path.join(__dirname, 'client');
+const clientIndex = path.join(clientDir, 'index.html');
+const serveClient = fs.existsSync(clientIndex);
+
+// Same-origin deploy (GoDaddy) needs no CORS; set CORS_ORIGIN when FE/API differ.
+app.use(cors({ origin: process.env.CORS_ORIGIN || (serveClient ? false : true) }));
 app.use(express.json());
+app.use(
+  '/api/public/landing-media',
+  express.static(path.join(__dirname, 'public', 'landing'), {
+    fallthrough: false,
+    maxAge: '7d',
+  }),
+);
 
 app.get('/api/hello', (req, res) => {
   res.json({ message: 'Hello from the backend' });
@@ -73,6 +94,22 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+app.get('/api/public/landing-images', async (req, res) => {
+  try {
+    const [images] = await db.query(
+      `SELECT id, section, title, alt_text AS altText, image_url AS imageUrl, sort_order AS sortOrder
+       FROM landing_images
+       WHERE is_active = 1
+       ORDER BY section, sort_order, id`,
+    );
+    res.json({ count: images.length, images });
+  } catch (err) {
+    console.error('Public landing images failed:', err.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
+});
+
+app.use('/api/public', publicBookingRouter);
 app.use('/api/services', requireAuth, servicesRouter);
 app.use('/api/products', requireAuth, productsRouter);
 app.use('/api/coupons', requireAuth, couponsRouter);
@@ -81,6 +118,21 @@ app.use('/api/appointments', requireAuth, appointmentsRouter);
 app.use('/api/inventory', requireAuth, requireRole('admin'), inventoryRouter);
 app.use('/api/customers', requireAuth, customersRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
+app.use('/api/membership-plans', requireAuth, membershipPlansRouter);
+app.use('/api/suppliers', requireAuth, requireRole('admin'), suppliersRouter);
+app.use('/api/purchases', requireAuth, requireRole('admin'), purchasesRouter);
+app.use('/api/reports', requireAuth, requireRole('admin'), reportsRouter);
+app.use('/api/landing-images/upload', requireAuth, requireRole('admin'), landingUploadRouter);
+app.use('/api/landing-images', requireAuth, requireRole('admin'), landingImagesRouter);
+
+if (serveClient) {
+  app.use(express.static(clientDir, { index: false, maxAge: '1h' }));
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(clientIndex, (err) => (err ? next(err) : undefined));
+  });
+}
 
 app.use((err, req, res, next) => {
   if (err.status && err.status < 500) {
@@ -95,4 +147,7 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Backend running on http://localhost:${PORT}`);
+  if (serveClient) {
+    console.log('Serving React client from ./client (single-site mode)');
+  }
 });

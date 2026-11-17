@@ -70,8 +70,24 @@ CREATE TABLE IF NOT EXISTS customers (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   phone VARCHAR(20) NOT NULL UNIQUE,
   name VARCHAR(100) NOT NULL,
+  email VARCHAR(255),
+  gender ENUM('female', 'male', 'other'),
+  birthday DATE,
+  notes VARCHAR(1000),
   stars SMALLINT UNSIGNED NOT NULL DEFAULT 0,
   free_services_redeemed SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sold at POS as a bill line; members get a percentage off services while valid.
+CREATE TABLE IF NOT EXISTS membership_plans (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL UNIQUE,
+  description VARCHAR(255),
+  price DECIMAL(10, 2) NOT NULL,
+  duration_days SMALLINT UNSIGNED NOT NULL,
+  discount_percent DECIMAL(5, 2) NOT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -83,6 +99,8 @@ CREATE TABLE IF NOT EXISTS invoices (
   loyalty_discount DECIMAL(10, 2) NOT NULL DEFAULT 0,
   free_service_id INT UNSIGNED,
   stars_earned SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+  membership_discount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  membership_name VARCHAR(100),
   coupon_code VARCHAR(30),
   discount DECIMAL(10, 2) NOT NULL DEFAULT 0,
   taxable_value DECIMAL(10, 2) NOT NULL,
@@ -96,7 +114,7 @@ CREATE TABLE IF NOT EXISTS invoices (
 CREATE TABLE IF NOT EXISTS invoice_items (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   invoice_id INT UNSIGNED NOT NULL,
-  item_type ENUM('service', 'product') NOT NULL,
+  item_type ENUM('service', 'product', 'membership') NOT NULL,
   item_id INT UNSIGNED NOT NULL,
   name VARCHAR(100) NOT NULL,
   quantity SMALLINT UNSIGNED NOT NULL,
@@ -146,10 +164,84 @@ CREATE TABLE IF NOT EXISTS appointments (
   status ENUM('pending', 'confirmed', 'checked_in', 'in_service', 'completed', 'cancelled', 'no_show')
     NOT NULL DEFAULT 'confirmed',
   notes VARCHAR(1000),
+  source ENUM('staff', 'online') NOT NULL DEFAULT 'staff',
   invoice_id INT UNSIGNED,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (employee_id) REFERENCES employees (id),
   FOREIGN KEY (service_id) REFERENCES services (id),
   FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE SET NULL,
   INDEX idx_appointments_day (appointment_date, employee_id)
+);
+
+-- Plan name and discount are copied so later plan edits don't change sold memberships.
+CREATE TABLE IF NOT EXISTS customer_memberships (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT UNSIGNED NOT NULL,
+  plan_id INT UNSIGNED NOT NULL,
+  plan_name VARCHAR(100) NOT NULL,
+  discount_percent DECIMAL(5, 2) NOT NULL,
+  price_paid DECIMAL(10, 2) NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  invoice_id INT UNSIGNED,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (customer_id) REFERENCES customers (id),
+  FOREIGN KEY (plan_id) REFERENCES membership_plans (id),
+  FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE SET NULL,
+  INDEX idx_memberships_customer (customer_id, end_date)
+);
+
+CREATE TABLE IF NOT EXISTS suppliers (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL UNIQUE,
+  contact_person VARCHAR(100),
+  phone VARCHAR(20),
+  email VARCHAR(255),
+  gstin VARCHAR(15),
+  address VARCHAR(500),
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Stock received from a supplier. Each line also writes a 'received' stock adjustment.
+CREATE TABLE IF NOT EXISTS purchases (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  purchase_number VARCHAR(30) UNIQUE,
+  supplier_id INT UNSIGNED NOT NULL,
+  supplier_invoice_no VARCHAR(50),
+  purchase_date DATE NOT NULL,
+  subtotal DECIMAL(10, 2) NOT NULL,
+  tax_amount DECIMAL(10, 2) NOT NULL DEFAULT 0,
+  total DECIMAL(10, 2) NOT NULL,
+  payment_status ENUM('unpaid', 'paid') NOT NULL DEFAULT 'unpaid',
+  note VARCHAR(255),
+  user_id INT UNSIGNED,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (supplier_id) REFERENCES suppliers (id),
+  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+  INDEX idx_purchases_date (purchase_date)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_items (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  purchase_id INT UNSIGNED NOT NULL,
+  product_id INT UNSIGNED NOT NULL,
+  product_name VARCHAR(100) NOT NULL,
+  quantity INT UNSIGNED NOT NULL,
+  unit_cost DECIMAL(10, 2) NOT NULL,
+  line_total DECIMAL(10, 2) NOT NULL,
+  FOREIGN KEY (purchase_id) REFERENCES purchases (id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products (id)
+);
+
+CREATE TABLE IF NOT EXISTS landing_images (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  section ENUM('hero', 'service', 'gallery', 'experience', 'visit') NOT NULL,
+  title VARCHAR(100) NULL,
+  alt_text VARCHAR(255) NULL,
+  image_url VARCHAR(1000) NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_landing_images_section (section, sort_order, is_active)
 );

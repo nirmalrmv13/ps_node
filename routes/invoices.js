@@ -3,6 +3,7 @@ const db = require('../db');
 const { priceFolio } = require('../billing');
 const { HttpError } = require('../errors');
 const { STARS_FOR_FREE, normalizePhone } = require('../loyalty');
+const { activeMembership, addMembership } = require('../membership');
 const { date, number, text } = require('../validation');
 
 const router = express.Router();
@@ -58,6 +59,12 @@ async function loadInvoice(id) {
   const freeService = invoice.free_service_id
     ? items.find((item) => item.type === 'service' && item.id === invoice.free_service_id)
     : null;
+  const [[membershipSold]] = await db.query(
+    `SELECT plan_name AS planName, DATE_FORMAT(start_date, '%Y-%m-%d') AS startDate,
+            DATE_FORMAT(end_date, '%Y-%m-%d') AS endDate
+     FROM customer_memberships WHERE invoice_id = ? LIMIT 1`,
+    [id],
+  );
 
   return {
     id: invoice.id,
@@ -68,12 +75,15 @@ async function loadInvoice(id) {
     appointment: appointments[0] ?? null,
     customer: customer ?? null,
     freeService: freeService ? { id: freeService.id, name: freeService.name } : null,
+    membershipName: invoice.membership_name,
+    membershipSold: membershipSold ?? null,
     starsEarned: invoice.stars_earned,
     items,
     usage,
     totals: {
       subtotal: invoice.subtotal,
       loyaltyDiscount: invoice.loyalty_discount,
+      membershipDiscount: invoice.membership_discount,
       discount: invoice.discount,
       taxableValue: invoice.taxable_value,
       gstRate: invoice.gst_rate,
@@ -117,7 +127,7 @@ router.get('/', async (req, res) => {
   const [[summary]] = await db.query(
     `SELECT COUNT(*) AS count, COALESCE(SUM(i.total), 0) AS revenue,
             COALESCE(SUM(i.cgst + i.sgst), 0) AS gst,
-            COALESCE(SUM(i.discount + i.loyalty_discount), 0) AS discounts
+            COALESCE(SUM(i.discount + i.loyalty_discount + i.membership_discount), 0) AS discounts
      ${filter}`,
     params,
   );
@@ -125,13 +135,16 @@ router.get('/', async (req, res) => {
   const [rows] = await db.query(
     `SELECT i.id, i.invoice_number AS invoiceNumber, i.created_at AS createdAt,
             i.coupon_code AS couponCode, i.discount, i.loyalty_discount AS loyaltyDiscount,
+            i.membership_discount AS membershipDiscount, i.membership_name AS membershipName,
             i.free_service_id IS NOT NULL AS freeServiceUsed, i.stars_earned AS starsEarned,
             i.cgst + i.sgst AS gst, i.total, c.name AS customerName, c.phone AS customerPhone,
             (SELECT a.id FROM appointments a WHERE a.invoice_id = i.id LIMIT 1) AS appointmentId,
             (SELECT COALESCE(SUM(quantity), 0) FROM invoice_items
               WHERE invoice_id = i.id AND item_type = 'service') AS services,
             (SELECT COALESCE(SUM(quantity), 0) FROM invoice_items
-              WHERE invoice_id = i.id AND item_type = 'product') AS products
+              WHERE invoice_id = i.id AND item_type = 'product') AS products,
+            (SELECT COALESCE(SUM(quantity), 0) FROM invoice_items
+              WHERE invoice_id = i.id AND item_type = 'membership') AS memberships
      ${filter}
      ORDER BY i.created_at DESC, i.id DESC
      LIMIT ?`,
@@ -146,8 +159,11 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/quote', async (req, res) => {
-  const { items, couponCode, freeServiceId } = req.body ?? {};
-  const folio = await priceFolio(db, items ?? [], couponCode, { freeServiceId });
+  const { items, couponCode, freeServiceId, customerPhone } = req.body ?? {};
+  const phone = normalizePhone(customerPhone);
+  const [[customer]] = phone ? await db.query('SELECT id FROM customers WHERE phone = ?', [phone]) : [[null]];
+  const membership = await activeMembership(db, customer?.id);
+  const folio = await priceFolio(db, items ?? [], couponCode, { freeServiceId, membership });
   res.json(folio);
 });
 
@@ -187,7 +203,9 @@ router.post('/', async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const folio = await priceFolio(conn, items, couponCode, { lock: true, usage, freeServiceId });
+    const customer = await lockCustomer(conn, req.body.customer);
+    const membership = await activeMembership(conn, customer?.id);
+    const folio = await priceFolio(conn, items, couponCode, { lock: true, usage, freeServiceId, membership });
     if (folio.couponError) {
       throw new HttpError(400, folio.couponError);
     }
@@ -195,7 +213,10 @@ router.post('/', async (req, res) => {
       await lockAppointmentForBilling(conn, appointmentId, folio);
     }
 
-    const customer = await lockCustomer(conn, req.body.customer);
+    const soldPlan = folio.lines.find((line) => line.type === 'membership');
+    if (soldPlan && !customer) {
+      throw new HttpError(400, 'Add the customer to sell a membership.');
+    }
     if (folio.freeService) {
       if (!customer) {
         throw new HttpError(400, 'Add the customer to redeem a free service.');
@@ -238,6 +259,8 @@ router.post('/', async (req, res) => {
         loyalty_discount: t.loyaltyDiscount,
         free_service_id: folio.freeService?.id ?? null,
         stars_earned: starsEarned,
+        membership_discount: t.membershipDiscount,
+        membership_name: t.membershipDiscount > 0 ? folio.membership.name : null,
         coupon_code: folio.coupon?.code ?? null,
         discount: t.discount,
         taxable_value: t.taxableValue,
@@ -288,6 +311,10 @@ router.post('/', async (req, res) => {
 
     for (const [productId, { quantity }] of stockNeeded) {
       await conn.query('UPDATE products SET stock = stock - ? WHERE id = ?', [quantity, productId]);
+    }
+
+    if (soldPlan) {
+      await addMembership(conn, { customerId: customer.id, plan: soldPlan, invoiceId });
     }
 
     if (appointmentId) {
