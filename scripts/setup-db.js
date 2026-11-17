@@ -43,11 +43,19 @@ async function upsertUser(connection, { envPrefix, role }) {
 }
 
 async function main() {
+  const host = process.env.DB_HOST || 'localhost';
+  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  // TiDB Cloud rejects non-TLS connections; keep local MySQL without SSL.
+  const ssl = isLocal
+    ? undefined
+    : { minVersion: 'TLSv1.2', rejectUnauthorized: true };
+
   const connection = await mysql.createConnection({
-    host: process.env.DB_HOST || 'localhost',
+    host,
     port: Number(process.env.DB_PORT) || 3306,
     user: process.env.DB_USER || 'root',
     password: process.env.DB_PASSWORD || '',
+    ssl,
     multipleStatements: true,
   });
 
@@ -74,10 +82,31 @@ async function main() {
       'stars_earned',
       'SMALLINT UNSIGNED NOT NULL DEFAULT 0 AFTER free_service_id',
     );
+    await ensureColumn(
+      connection,
+      'invoices',
+      'membership_discount',
+      'DECIMAL(10, 2) NOT NULL DEFAULT 0 AFTER stars_earned',
+    );
+    await ensureColumn(connection, 'invoices', 'membership_name', 'VARCHAR(100) AFTER membership_discount');
+    await ensureColumn(connection, 'customers', 'email', 'VARCHAR(255) AFTER name');
+    await ensureColumn(connection, 'customers', 'gender', "ENUM('female', 'male', 'other') AFTER email");
+    await ensureColumn(connection, 'customers', 'birthday', 'DATE AFTER gender');
+    await ensureColumn(connection, 'customers', 'notes', 'VARCHAR(1000) AFTER birthday');
+    await ensureColumn(
+      connection,
+      'appointments',
+      'source',
+      "ENUM('staff', 'online') NOT NULL DEFAULT 'staff' AFTER notes",
+    );
+    await ensureColumn(connection, 'appointments', 'online_ref', 'INT UNSIGNED AFTER source');
+    await connection.query(
+      "ALTER TABLE invoice_items MODIFY COLUMN item_type ENUM('service', 'product', 'membership') NOT NULL",
+    );
     console.log('Database and tables are ready.');
 
     await connection.query(fs.readFileSync(path.join(sqlDir, 'seed.sql'), 'utf8'));
-    console.log('Sample services, products, coupons and employees are loaded.');
+    console.log('Sample services, products, coupons, employees, membership plans and suppliers are loaded.');
 
     for (const seedUser of seedUsers) {
       await upsertUser(connection, seedUser);

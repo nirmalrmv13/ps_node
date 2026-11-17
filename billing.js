@@ -6,17 +6,23 @@ const MAX_QUANTITY = 99;
 const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
 const formatRupees = (value) => `₹${value.toLocaleString('en-IN')}`;
 
+const ITEM_COLUMNS = {
+  services: 'id, name, category, duration_minutes, price',
+  products: 'id, name, brand, size, price, stock',
+  membership_plans: 'id, name, duration_days, discount_percent, price',
+};
+
 function normalizeItems(items) {
   if (!Array.isArray(items)) {
     throw new HttpError(400, 'Items must be a list.');
   }
 
-  return items.map((item) => {
+  const normalized = items.map((item) => {
     const type = item?.type;
     const id = Number(item?.id);
     const quantity = Number(item?.quantity);
 
-    if (!['service', 'product'].includes(type) || !Number.isInteger(id) || id <= 0) {
+    if (!['service', 'product', 'membership'].includes(type) || !Number.isInteger(id) || id <= 0) {
       throw new HttpError(400, 'Each item needs a valid type and id.');
     }
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QUANTITY) {
@@ -24,6 +30,12 @@ function normalizeItems(items) {
     }
     return { type, id, quantity };
   });
+
+  const memberships = normalized.filter((item) => item.type === 'membership');
+  if (memberships.length > 1 || memberships.some((item) => item.quantity > 1)) {
+    throw new HttpError(400, 'A bill can include only one membership.');
+  }
+  return normalized;
 }
 
 function normalizeUsage(usage) {
@@ -58,12 +70,8 @@ function normalizeUsage(usage) {
 async function fetchRows(conn, table, ids, lock) {
   if (ids.length === 0) return new Map();
 
-  const columns =
-    table === 'services'
-      ? 'id, name, category, duration_minutes, price'
-      : 'id, name, brand, size, price, stock';
   const [rows] = await conn.query(
-    `SELECT ${columns} FROM ${table} WHERE is_active = 1 AND id IN (?)${lock ? ' FOR UPDATE' : ''}`,
+    `SELECT ${ITEM_COLUMNS[table]} FROM ${table} WHERE is_active = 1 AND id IN (?)${lock ? ' FOR UPDATE' : ''}`,
     [ids],
   );
   return new Map(rows.map((row) => [row.id, row]));
@@ -97,26 +105,39 @@ async function findCoupon(conn, code, subtotal) {
   return { coupon };
 }
 
+function lineDetail(type, row) {
+  if (type === 'service') return `${row.category} • ${row.duration_minutes} min`;
+  if (type === 'membership') return `${row.duration_days} days • ${row.discount_percent}% off services`;
+  return [row.brand, row.size].filter(Boolean).join(' • ');
+}
+
 /**
  * Prices a folio from the database. With `lock`, the product rows stay locked
  * until the surrounding transaction ends, so stock can't change underneath us.
+ * `membership` is the customer's active membership; a membership sold on this
+ * bill applies its discount straight away.
  */
 async function priceFolio(
   conn,
   rawItems,
   rawCouponCode,
-  { lock = false, usage: rawUsage, freeServiceId: rawFreeServiceId } = {},
+  { lock = false, usage: rawUsage, freeServiceId: rawFreeServiceId, membership: activeMembership = null } = {},
 ) {
   const items = normalizeItems(rawItems);
   const usageEntries = normalizeUsage(rawUsage);
   const idsOf = (type) => [...new Set(items.filter((i) => i.type === type).map((i) => i.id))];
   const productIds = [...new Set([...idsOf('product'), ...usageEntries.map((u) => u.productId)])];
 
-  const services = await fetchRows(conn, 'services', idsOf('service'), lock);
-  const products = await fetchRows(conn, 'products', productIds, lock);
+  const rowsByType = {
+    service: await fetchRows(conn, 'services', idsOf('service'), lock),
+    product: await fetchRows(conn, 'products', productIds, lock),
+    membership: await fetchRows(conn, 'membership_plans', idsOf('membership'), lock),
+  };
+  const services = rowsByType.service;
+  const products = rowsByType.product;
 
   const lines = items.map((item) => {
-    const row = (item.type === 'service' ? services : products).get(item.id);
+    const row = rowsByType[item.type].get(item.id);
     if (!row) {
       throw new HttpError(400, `That ${item.type} is no longer available.`);
     }
@@ -125,14 +146,15 @@ async function priceFolio(
       type: item.type,
       id: item.id,
       name: row.name,
-      detail:
-        item.type === 'service'
-          ? `${row.category} • ${row.duration_minutes} min`
-          : [row.brand, row.size].filter(Boolean).join(' • '),
+      detail: lineDetail(item.type, row),
       quantity: item.quantity,
       rate: row.price,
       lineTotal: round2(row.price * item.quantity),
       ...(item.type === 'product' && { stock: row.stock }),
+      ...(item.type === 'membership' && {
+        durationDays: row.duration_days,
+        discountPercent: row.discount_percent,
+      }),
     };
   });
 
@@ -168,7 +190,18 @@ async function priceFolio(
     freeService = { id: line.id, name: line.name, value: round2(Number(line.rate)) };
   }
   const loyaltyDiscount = freeService?.value ?? 0;
-  const payable = round2(subtotal - loyaltyDiscount);
+
+  const soldPlan = lines.find((l) => l.type === 'membership');
+  const member = activeMembership
+    ? { name: activeMembership.planName, discountPercent: Number(activeMembership.discountPercent) }
+    : soldPlan
+      ? { name: soldPlan.name, discountPercent: Number(soldPlan.discountPercent) }
+      : null;
+  const serviceValue = lines.filter((l) => l.type === 'service').reduce((sum, l) => sum + l.lineTotal, 0);
+  const membershipDiscount = member
+    ? round2(((serviceValue - loyaltyDiscount) * member.discountPercent) / 100)
+    : 0;
+  const payable = round2(subtotal - loyaltyDiscount - membershipDiscount);
 
   const code = typeof rawCouponCode === 'string' ? rawCouponCode.trim().toUpperCase() : '';
   const { coupon, error: couponError } = code ? await findCoupon(conn, code, payable) : {};
@@ -185,10 +218,12 @@ async function priceFolio(
     coupon: coupon ? { code: coupon.code, description: coupon.description } : null,
     couponError: couponError ?? null,
     freeService,
+    membership: member,
     starsEarned: serviceUnits - (freeService ? 1 : 0),
     totals: {
       subtotal,
       loyaltyDiscount,
+      membershipDiscount,
       discount,
       taxableValue,
       gstRate: GST_RATE,

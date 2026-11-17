@@ -16,7 +16,7 @@ const selectAppointments = `
          a.employee_id AS employeeId, e.name AS employeeName, e.designation AS employeeDesignation,
          a.service_id AS serviceId, s.name AS serviceName, s.category AS serviceCategory,
          s.price AS servicePrice, a.client_name AS clientName, a.client_phone AS clientPhone,
-         a.status, a.notes, a.invoice_id AS invoiceId, i.invoice_number AS invoiceNumber
+         a.status, a.notes, a.source, a.online_ref AS onlineRef, a.invoice_id AS invoiceId, i.invoice_number AS invoiceNumber
   FROM appointments a
   JOIN employees e ON e.id = a.employee_id
   JOIN services s ON s.id = a.service_id
@@ -199,3 +199,6 @@ router.put('/:id/status', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.INACTIVE_STATUSES = INACTIVE_STATUSES;
+module.exports.scheduleBooking = scheduleBooking;
+module.exports.findAppointment = findAppointment;

@@ -47,3 +47,15 @@ INSERT INTO employees (employee_code, name, designation, phone, email, joining_d
   ('EMP003', 'Anjali Nair', 'Beautician', '9876500003', 'anjali@prosignature.in', '2024-06-01', 8.00),
   ('EMP004', 'Meera Das', 'Spa Therapist', '9876500004', NULL, '2025-02-20', 7.50)
 ON DUPLICATE KEY UPDATE id = id;
+
+INSERT INTO membership_plans (name, description, price, duration_days, discount_percent) VALUES
+  ('Silver Membership', '10% off every service for 3 months.', 1500.00, 90, 10.00),
+  ('Gold Membership', '15% off every service for a full year.', 4000.00, 365, 15.00),
+  ('Platinum Membership', '25% off every service for a full year.', 7500.00, 365, 25.00)
+ON DUPLICATE KEY UPDATE id = id;
+
+INSERT INTO suppliers (name, contact_person, phone, email, gstin, address) VALUES
+  ('Serene Botanicals Distributors', 'Kavita Rao', '9845000101', 'orders@serenebotanicals.in', '29AAFCS5678L1Z2', 'Indiranagar, Bengaluru'),
+  ('Aroma Veda Wholesale', 'Sanjay Gupta', '9845000102', NULL, '29AAGCA4321M1Z9', 'Jayanagar, Bengaluru'),
+  ('Lotus Glow Cosmetics', 'Neha Iyer', '9845000103', 'sales@lotusglow.in', NULL, 'Koramangala, Bengaluru')
+ON DUPLICATE KEY UPDATE id = id;

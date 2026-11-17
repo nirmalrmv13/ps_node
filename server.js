@@ -14,6 +14,11 @@ const customersRouter = require('./routes/customers');
 const { STARS_FOR_FREE } = require('./loyalty');
 const { closesAt, opensAt, toClock } = require('./salonHours');
 const invoicesRouter = require('./routes/invoices');
+const membershipPlansRouter = require('./routes/membershipPlans');
+const suppliersRouter = require('./routes/suppliers');
+const purchasesRouter = require('./routes/purchases');
+const reportsRouter = require('./routes/reports');
+const publicBookingRouter = require('./routes/publicBooking');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -73,6 +78,7 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+app.use('/api/public', publicBookingRouter);
 app.use('/api/services', requireAuth, servicesRouter);
 app.use('/api/products', requireAuth, productsRouter);
 app.use('/api/coupons', requireAuth, couponsRouter);
@@ -81,6 +87,10 @@ app.use('/api/appointments', requireAuth, appointmentsRouter);
 app.use('/api/inventory', requireAuth, requireRole('admin'), inventoryRouter);
 app.use('/api/customers', requireAuth, customersRouter);
 app.use('/api/invoices', requireAuth, invoicesRouter);
+app.use('/api/membership-plans', requireAuth, membershipPlansRouter);
+app.use('/api/suppliers', requireAuth, requireRole('admin'), suppliersRouter);
+app.use('/api/purchases', requireAuth, requireRole('admin'), purchasesRouter);
+app.use('/api/reports', requireAuth, requireRole('admin'), reportsRouter);
 
 app.use((err, req, res, next) => {
   if (err.status && err.status < 500) {
