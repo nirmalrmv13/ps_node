@@ -165,6 +165,7 @@ CREATE TABLE IF NOT EXISTS appointments (
     NOT NULL DEFAULT 'confirmed',
   notes VARCHAR(1000),
   source ENUM('staff', 'online') NOT NULL DEFAULT 'staff',
+  online_ref INT UNSIGNED,
   invoice_id INT UNSIGNED,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (employee_id) REFERENCES employees (id),

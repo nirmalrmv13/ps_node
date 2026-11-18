@@ -115,6 +115,8 @@ async function main() {
     await ensureColumn(connection, 'customers', 'birthday', 'DATE AFTER gender');
     await ensureColumn(connection, 'customers', 'notes', 'VARCHAR(1000) AFTER birthday');
     await ensureEnum(connection, 'invoice_items', 'item_type', ['service', 'product', 'membership']);
+    await ensureColumn(connection, 'appointments', 'source', "ENUM('staff', 'online') NOT NULL DEFAULT 'staff' AFTER notes");
+    await ensureColumn(connection, 'appointments', 'online_ref', 'INT UNSIGNED AFTER source');
     console.log('Database and tables are ready.');
 
     await connection.query(fs.readFileSync(path.join(sqlDir, 'seed.sql'), 'utf8'));
