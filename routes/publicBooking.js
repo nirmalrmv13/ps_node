@@ -1,5 +1,6 @@
 const express = require('express');
 const db = require('../db');
+const { GST_RATE } = require('../billing');
 const { HttpError } = require('../errors');
 const { normalizePhone } = require('../loyalty');
 const { closesAt, opensAt, toClock, toDisplayTime } = require('../salonHours');
@@ -36,9 +37,23 @@ function limitBookings(req, res, next) {
   next();
 }
 
+const SALON_TZ = process.env.SALON_TIMEZONE || 'Asia/Kolkata';
+
+/** Current salon calendar day + clock minutes in India time (not the server's UTC clock). */
 function salonNow() {
-  const now = new Date();
-  return { today: now.toLocaleDateString('en-CA'), minutes: now.getHours() * 60 + now.getMinutes() };
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: SALON_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  const today = `${get('year')}-${get('month')}-${get('day')}`;
+  const minutes = Number(get('hour')) * 60 + Number(get('minute'));
+  return { today, minutes };
 }
 
 function lastBookableDay(today) {
@@ -110,6 +125,7 @@ router.get('/options', async (req, res) => {
     today,
     lastDay: lastBookableDay(today),
     maxServices: MAX_SERVICES,
+    gstRate: GST_RATE,
     services: services.map((s) => ({ ...s, price: Number(s.price) })),
     specialists,
   });
@@ -248,6 +264,7 @@ router.post('/bookings', limitBookings, async (req, res) => {
         endTime: p.endTime,
       })),
       total: parts.reduce((sum, p) => sum + p.servicePrice, 0),
+      gstRate: GST_RATE,
       specialistName: first.employeeName,
       clientName: first.clientName,
       clientPhone: first.clientPhone,

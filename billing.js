@@ -1,6 +1,6 @@
 const { HttpError } = require('./errors');
 
-const GST_RATE = Number(process.env.GST_RATE ?? 12);
+const GST_RATE = Number(process.env.GST_RATE ?? 18);
 const MAX_QUANTITY = 99;
 
 const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
