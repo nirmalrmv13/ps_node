@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { isAdmin, requireRole } = require('../auth');
+const { hardDelete } = require('../hardDelete');
 const { HttpError } = require('../errors');
 const { number, text } = require('../validation');
 
@@ -51,6 +52,11 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     throw new HttpError(404, 'Membership plan not found.');
   }
   res.json({ plan: await findPlan(req.params.id) });
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  await hardDelete('membership_plans', req.params.id, 'Membership plan');
+  res.json({ ok: true });
 });
 
 module.exports = router;

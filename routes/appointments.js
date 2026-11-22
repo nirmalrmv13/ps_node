@@ -1,7 +1,8 @@
 const express = require('express');
 const db = require('../db');
 const { HttpError } = require('../errors');
-const { closesAt, opensAt, toClock, toDisplayTime } = require('../salonHours');
+const { toClock, toDisplayTime } = require('../salonHours');
+const { getStoreSettings, hoursForDate } = require('../storeSettings');
 const { inTransaction } = require('../transaction');
 const { date, number, text, time } = require('../validation');
 
@@ -90,6 +91,8 @@ async function scheduleBooking(conn, booking, { checkClash = true, excludeId } =
   }
 
   const end = booking.start + service.duration;
+  const settings = await getStoreSettings();
+  const { opensAt, closesAt } = hoursForDate(settings, booking.date);
   if (booking.start < opensAt || end > closesAt) {
     throw new HttpError(
       400,

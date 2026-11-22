@@ -5,6 +5,8 @@ const { HttpError } = require('../errors');
 const { STARS_FOR_FREE, normalizePhone } = require('../loyalty');
 const { activeMembership, addMembership } = require('../membership');
 const { date, number, text } = require('../validation');
+const { buildInvoicePdf } = require('../invoicePdf');
+const { getStoreSettings } = require('../storeSettings');
 
 const router = express.Router();
 
@@ -260,7 +262,7 @@ router.post('/', async (req, res) => {
         free_service_id: folio.freeService?.id ?? null,
         stars_earned: starsEarned,
         membership_discount: t.membershipDiscount,
-        membership_name: t.membershipDiscount > 0 ? folio.membership.name : null,
+        membership_name: folio.membership?.name ?? null,
         coupon_code: folio.coupon?.code ?? null,
         discount: t.discount,
         taxable_value: t.taxableValue,
@@ -332,7 +334,24 @@ router.post('/', async (req, res) => {
     conn.release();
   }
 
-  res.status(201).json({ invoice: await loadInvoice(invoiceId) });
+  const invoice = await loadInvoice(invoiceId);
+  res.status(201).json({ invoice });
+});
+
+router.get('/:id/pdf', async (req, res) => {
+  const invoice = await loadInvoice(req.params.id);
+  if (!invoice) {
+    return res.status(404).json({ message: 'Invoice not found.' });
+  }
+  const store = await getStoreSettings();
+  const pdf = await buildInvoicePdf(invoice, {
+    businessName: store.businessName,
+    gstin: store.gstin,
+  });
+  const filename = `${invoice.invoiceNumber || `invoice-${invoice.id}`}.pdf`;
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(pdf);
 });
 
 router.get('/:id', async (req, res) => {

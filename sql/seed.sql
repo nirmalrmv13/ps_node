@@ -1,22 +1,22 @@
 USE serene_sanctuary;
 
-INSERT INTO services (name, category, description, duration_minutes, price) VALUES
-  ('Signature Haircut & Style', 'Hair', 'Consultation, precision cut, wash and blow-dry styled to suit you.', 45, 800.00),
-  ('Nourishing Hair Spa', 'Hair', 'Deep-conditioning treatment with scalp massage to restore shine and softness.', 60, 1500.00),
-  ('Global Hair Colour', 'Hair', 'Full-head ammonia-free colour with a gloss finish.', 120, 3500.00),
-  ('Keratin Smoothing Treatment', 'Hair', 'Frizz-control treatment for smooth, manageable hair for up to 3 months.', 150, 6000.00),
-  ('Hydrating Facial', 'Skin', 'Cleanse, exfoliate and hydrate with a hyaluronic mask for a dewy glow.', 60, 2000.00),
-  ('Gold Radiance Facial', 'Skin', 'Brightening facial with 24K gold serum and lymphatic massage.', 75, 3000.00),
-  ('Anti-Ageing Facial', 'Skin', 'Firming treatment with peptides and LED therapy to reduce fine lines.', 75, 3500.00),
-  ('Swedish Relaxation Massage', 'Massage', 'Gentle full-body massage with long flowing strokes to melt away stress.', 60, 2500.00),
-  ('Deep Tissue Massage', 'Massage', 'Firm pressure massage targeting muscle tension and knots.', 60, 3000.00),
-  ('Aromatherapy Massage', 'Massage', 'Full-body massage with your choice of calming essential oil blend.', 90, 3500.00),
-  ('Hot Stone Therapy', 'Massage', 'Heated basalt stones release deep tension and improve circulation.', 90, 4000.00),
-  ('Classic Manicure', 'Nails', 'Nail shaping, cuticle care, hand massage and polish.', 30, 600.00),
-  ('Spa Pedicure', 'Nails', 'Foot soak, scrub, callus care, massage and polish.', 45, 900.00),
-  ('Gel Polish', 'Nails', 'Long-lasting, chip-resistant gel colour for hands or feet.', 45, 1200.00),
-  ('Body Polish & Wrap', 'Spa Rituals', 'Full-body exfoliation followed by a nourishing herbal wrap.', 90, 4500.00),
-  ('Couples Retreat Package', 'Spa Rituals', 'Side-by-side aromatherapy massage, facial and herbal tea for two.', 120, 8000.00)
+INSERT INTO services (name, category, description, duration_minutes, price, membership_price) VALUES
+  ('Signature Haircut & Style', 'Hair', 'Consultation, precision cut, wash and blow-dry styled to suit you.', 45, 800.00, 650.00),
+  ('Nourishing Hair Spa', 'Hair', 'Deep-conditioning treatment with scalp massage to restore shine and softness.', 60, 1500.00, 1200.00),
+  ('Global Hair Colour', 'Hair', 'Full-head ammonia-free colour with a gloss finish.', 120, 3500.00, 2900.00),
+  ('Keratin Smoothing Treatment', 'Hair', 'Frizz-control treatment for smooth, manageable hair for up to 3 months.', 150, 6000.00, 5200.00),
+  ('Hydrating Facial', 'Skin', 'Cleanse, exfoliate and hydrate with a hyaluronic mask for a dewy glow.', 60, 2000.00, 1600.00),
+  ('Gold Radiance Facial', 'Skin', 'Brightening facial with 24K gold serum and lymphatic massage.', 75, 3000.00, 2500.00),
+  ('Anti-Ageing Facial', 'Skin', 'Firming treatment with peptides and LED therapy to reduce fine lines.', 75, 3500.00, 2900.00),
+  ('Swedish Relaxation Massage', 'Massage', 'Gentle full-body massage with long flowing strokes to melt away stress.', 60, 2500.00, 2000.00),
+  ('Deep Tissue Massage', 'Massage', 'Firm pressure massage targeting muscle tension and knots.', 60, 3000.00, 2500.00),
+  ('Aromatherapy Massage', 'Massage', 'Full-body massage with your choice of calming essential oil blend.', 90, 3500.00, 2900.00),
+  ('Hot Stone Therapy', 'Massage', 'Heated basalt stones release deep tension and improve circulation.', 90, 4000.00, 3400.00),
+  ('Classic Manicure', 'Nails', 'Nail shaping, cuticle care, hand massage and polish.', 30, 600.00, 480.00),
+  ('Spa Pedicure', 'Nails', 'Foot soak, scrub, callus care, massage and polish.', 45, 900.00, 720.00),
+  ('Gel Polish', 'Nails', 'Long-lasting, chip-resistant gel colour for hands or feet.', 45, 1200.00, 980.00),
+  ('Body Polish & Wrap', 'Spa Rituals', 'Full-body exfoliation followed by a nourishing herbal wrap.', 90, 4500.00, 3800.00),
+  ('Couples Retreat Package', 'Spa Rituals', 'Side-by-side aromatherapy massage, facial and herbal tea for two.', 120, 8000.00, 6800.00)
 ON DUPLICATE KEY UPDATE id = id;
 
 INSERT INTO products (name, brand, category, description, size, price, stock) VALUES

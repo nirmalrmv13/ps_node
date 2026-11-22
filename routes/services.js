@@ -2,18 +2,33 @@ const express = require('express');
 const db = require('../db');
 const { isAdmin, requireRole } = require('../auth');
 const { HttpError } = require('../errors');
+const { hardDelete } = require('../hardDelete');
 const { number, text } = require('../validation');
 
 const router = express.Router();
 
 const columns =
-  'id, name, category, description, duration_minutes AS durationMinutes, price, is_active AS isActive';
+  'id, name, category, description, duration_minutes AS durationMinutes, price, membership_price AS membershipPrice, is_active AS isActive';
 
 function formatService(service) {
-  return { ...service, isActive: Boolean(service.isActive) };
+  return {
+    ...service,
+    price: Number(service.price),
+    membershipPrice: Number(service.membershipPrice),
+    isActive: Boolean(service.isActive),
+  };
 }
 
 function parseService(body = {}) {
+  const price = number(body.price, 'Normal price', { required: true, min: 0, max: 9999999 });
+  const membershipPrice = number(body.membershipPrice, 'Membership price', {
+    required: true,
+    min: 0,
+    max: 9999999,
+  });
+  if (membershipPrice > price) {
+    throw new HttpError(400, 'Membership price cannot be higher than the normal price.');
+  }
   return {
     name: text(body.name, 'Name', { required: true, max: 100 }),
     category: text(body.category, 'Category', { required: true, max: 50 }),
@@ -24,7 +39,8 @@ function parseService(body = {}) {
       max: 720,
       integer: true,
     }),
-    price: number(body.price, 'Price', { required: true, min: 0, max: 9999999 }),
+    price,
+    membership_price: membershipPrice,
     is_active: body.isActive === false ? 0 : 1,
   };
 }
@@ -83,6 +99,11 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     throw new HttpError(404, 'Service not found.');
   }
   res.json({ service: await findService(req.params.id, true) });
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  await hardDelete('services', req.params.id, 'Service');
+  res.json({ ok: true });
 });
 
 module.exports = router;

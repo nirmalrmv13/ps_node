@@ -7,16 +7,21 @@ const router = express.Router();
 
 const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
 
-router.get('/', async (req, res) => {
-  const from = date(req.query.from, 'From date', { required: true });
-  const to = date(req.query.to, 'To date', { required: true });
-  if (from > to) {
-    throw new HttpError(400, 'The From date must be on or before the To date.');
-  }
+function addDays(day, days) {
+  const dateObj = new Date(`${day}T00:00:00Z`);
+  dateObj.setUTCDate(dateObj.getUTCDate() + days);
+  return dateObj.toISOString().slice(0, 10);
+}
 
+function daySpan(from, to) {
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+async function salesSummary(from, to) {
   const inRange = 'i.created_at >= ? AND i.created_at < ? + INTERVAL 1 DAY';
   const range = [`${from} 00:00:00`, `${to} 00:00:00`];
-
   const [[sales]] = await db.query(
     `SELECT COUNT(*) AS invoices, COALESCE(SUM(i.total), 0) AS revenue,
             COALESCE(SUM(i.taxable_value), 0) AS netSales, COALESCE(SUM(i.cgst + i.sgst), 0) AS gst,
@@ -28,11 +33,31 @@ router.get('/', async (req, res) => {
      FROM invoices i WHERE ${inRange}`,
     range,
   );
-
   const [[{ newCustomers }]] = await db.query(
     'SELECT COUNT(*) AS newCustomers FROM customers WHERE created_at >= ? AND created_at < ? + INTERVAL 1 DAY',
     range,
   );
+  return {
+    ...sales,
+    newCustomers,
+    averageBill: sales.invoices ? round2(sales.revenue / sales.invoices) : 0,
+  };
+}
+
+router.get('/', async (req, res) => {
+  const from = date(req.query.from, 'From date', { required: true });
+  const to = date(req.query.to, 'To date', { required: true });
+  if (from > to) {
+    throw new HttpError(400, 'The From date must be on or before the To date.');
+  }
+
+  const inRange = 'i.created_at >= ? AND i.created_at < ? + INTERVAL 1 DAY';
+  const range = [`${from} 00:00:00`, `${to} 00:00:00`];
+  const span = daySpan(from, to);
+  const previousTo = addDays(from, -1);
+  const previousFrom = addDays(previousTo, -(span - 1));
+
+  const [sales, previous] = await Promise.all([salesSummary(from, to), salesSummary(previousFrom, previousTo)]);
 
   const [daily] = await db.query(
     `SELECT DATE_FORMAT(i.created_at, '%Y-%m-%d') AS day, COUNT(*) AS invoices, SUM(i.total) AS revenue
@@ -122,7 +147,10 @@ router.get('/', async (req, res) => {
   res.json({
     from,
     to,
-    sales: { ...sales, newCustomers, averageBill: sales.invoices ? round2(sales.revenue / sales.invoices) : 0 },
+    sales,
+    previous,
+    previousFrom,
+    previousTo,
     daily,
     services: items.filter((item) => item.type === 'service'),
     products: items.filter((item) => item.type === 'product'),

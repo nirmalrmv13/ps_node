@@ -101,7 +101,7 @@ router.get('/', async (req, res) => {
     `SELECT p.id, p.purchase_number AS purchaseNumber, DATE_FORMAT(p.purchase_date, '%Y-%m-%d') AS purchaseDate,
             s.name AS supplierName, p.supplier_invoice_no AS supplierInvoiceNo, p.subtotal,
             p.tax_amount AS taxAmount, p.total, p.payment_status AS paymentStatus, p.note,
-            (SELECT COUNT(*) FROM purchase_items WHERE purchase_id = p.id) AS lines,
+            (SELECT COUNT(*) FROM purchase_items WHERE purchase_id = p.id) AS lineCount,
             (SELECT COALESCE(SUM(quantity), 0) FROM purchase_items WHERE purchase_id = p.id) AS units
      ${filter}
      ORDER BY p.purchase_date DESC, p.id DESC

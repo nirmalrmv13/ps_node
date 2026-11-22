@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { isAdmin, requireRole } = require('../auth');
+const { hardDelete } = require('../hardDelete');
 const { HttpError } = require('../errors');
 const { recordAdjustment } = require('../stock');
 const { inTransaction } = require('../transaction');
@@ -109,6 +110,11 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     }
   });
   res.json({ product: await findProduct(req.params.id, true) });
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  await hardDelete('products', req.params.id, 'Product');
+  res.json({ ok: true });
 });
 
 module.exports = router;

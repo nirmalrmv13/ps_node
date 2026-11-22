@@ -18,15 +18,16 @@ async function activeMembership(conn, customerId) {
   return membership ?? null;
 }
 
-/** Records a membership sold on an invoice, queued after any membership the customer already holds. */
-async function addMembership(conn, { customerId, plan, invoiceId }) {
+/** Records a membership for a customer, queued after any membership they already hold. */
+async function addMembership(conn, { customerId, plan, invoiceId = null, pricePaid }) {
   const [[{ startDate }]] = await conn.query(
     `SELECT DATE_FORMAT(GREATEST(CURDATE(), COALESCE(MAX(end_date) + INTERVAL 1 DAY, CURDATE())), '%Y-%m-%d')
               AS startDate
      FROM customer_memberships WHERE customer_id = ?`,
     [customerId],
   );
-  await conn.query(
+  const paid = pricePaid ?? plan.rate ?? plan.price ?? 0;
+  const [result] = await conn.query(
     `INSERT INTO customer_memberships
        (customer_id, plan_id, plan_name, discount_percent, price_paid, start_date, end_date, invoice_id)
      VALUES (?, ?, ?, ?, ?, ?, DATE_ADD(?, INTERVAL ? DAY), ?)`,
@@ -35,13 +36,33 @@ async function addMembership(conn, { customerId, plan, invoiceId }) {
       plan.id,
       plan.name,
       plan.discountPercent,
-      plan.rate,
+      paid,
       startDate,
       startDate,
       plan.durationDays - 1,
       invoiceId,
     ],
   );
+  return {
+    id: result.insertId,
+    startDate,
+    endDate: null,
+    pricePaid: paid,
+  };
 }
 
-module.exports = { activeMembership, addMembership };
+async function previewMembershipDates(conn, customerId, durationDays) {
+  const [[{ startDate }]] = await conn.query(
+    `SELECT DATE_FORMAT(GREATEST(CURDATE(), COALESCE(MAX(end_date) + INTERVAL 1 DAY, CURDATE())), '%Y-%m-%d')
+              AS startDate
+     FROM customer_memberships WHERE customer_id = ?`,
+    [customerId],
+  );
+  const [[row]] = await conn.query(
+    `SELECT DATE_FORMAT(DATE_ADD(?, INTERVAL ? DAY), '%Y-%m-%d') AS endDate`,
+    [startDate, durationDays - 1],
+  );
+  return { startDate, endDate: row.endDate };
+}
+
+module.exports = { activeMembership, addMembership, previewMembershipDates };

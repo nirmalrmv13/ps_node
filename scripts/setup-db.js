@@ -78,6 +78,8 @@ async function main() {
     await connection.query(fs.readFileSync(path.join(sqlDir, 'schema.sql'), 'utf8'));
     await connection.query(fs.readFileSync(path.join(sqlDir, 'landing_images.sql'), 'utf8'));
     await connection.query(fs.readFileSync(path.join(sqlDir, 'landing_images_seed.sql'), 'utf8'));
+    await connection.query(fs.readFileSync(path.join(sqlDir, 'store_settings.sql'), 'utf8'));
+    console.log('Store settings table is ready.');
     await connection.query(
       `UPDATE landing_images
        SET image_url = CONCAT('/api/public/landing-media/', SUBSTRING_INDEX(image_url, '/', -1))
@@ -117,6 +119,18 @@ async function main() {
     await ensureEnum(connection, 'invoice_items', 'item_type', ['service', 'product', 'membership']);
     await ensureColumn(connection, 'appointments', 'source', "ENUM('staff', 'online') NOT NULL DEFAULT 'staff' AFTER notes");
     await ensureColumn(connection, 'appointments', 'online_ref', 'INT UNSIGNED AFTER source');
+    await ensureColumn(
+      connection,
+      'services',
+      'membership_price',
+      'DECIMAL(10, 2) NULL AFTER price',
+    );
+    await connection.query(
+      'UPDATE services SET membership_price = price WHERE membership_price IS NULL',
+    );
+    await ensureColumn(connection, 'employees', 'date_of_birth', 'DATE NULL AFTER email');
+    await ensureColumn(connection, 'employees', 'location', 'VARCHAR(120) NULL AFTER date_of_birth');
+    await ensureColumn(connection, 'customers', 'location', 'VARCHAR(120) NULL AFTER birthday');
     console.log('Database and tables are ready.');
 
     await connection.query(fs.readFileSync(path.join(sqlDir, 'seed.sql'), 'utf8'));

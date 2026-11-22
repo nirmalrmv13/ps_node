@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { HttpError } = require('../errors');
+const { hardDelete } = require('../hardDelete');
 const { text } = require('../validation');
 
 const router = express.Router();
@@ -61,6 +62,11 @@ router.put('/:id', async (req, res) => {
     throw new HttpError(404, 'Supplier not found.');
   }
   res.json({ supplier: await findSupplier(req.params.id) });
+});
+
+router.delete('/:id', async (req, res) => {
+  await hardDelete('suppliers', req.params.id, 'Supplier');
+  res.json({ ok: true });
 });
 
 module.exports = router;

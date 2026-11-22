@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { isAdmin, requireRole } = require('../auth');
 const { HttpError } = require('../errors');
+const { hardDelete } = require('../hardDelete');
 const { number, text } = require('../validation');
 
 const router = express.Router();
@@ -73,6 +74,11 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     throw new HttpError(404, 'Coupon not found.');
   }
   res.json({ coupon: await findCoupon(req.params.id) });
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  await hardDelete('coupons', req.params.id, 'Coupon');
+  res.json({ ok: true });
 });
 
 module.exports = router;

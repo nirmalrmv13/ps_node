@@ -14,7 +14,8 @@ const appointmentsRouter = require('./routes/appointments');
 const inventoryRouter = require('./routes/inventory');
 const customersRouter = require('./routes/customers');
 const { STARS_FOR_FREE } = require('./loyalty');
-const { closesAt, opensAt, toClock } = require('./salonHours');
+const { getStoreSettings, publicStorePayload } = require('./storeSettings');
+const storeSettingsRouter = require('./routes/storeSettings');
 const invoicesRouter = require('./routes/invoices');
 const membershipPlansRouter = require('./routes/membershipPlans');
 const suppliersRouter = require('./routes/suppliers');
@@ -79,19 +80,22 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-app.get('/api/config', (req, res) => {
-  res.json({
-    businessName: process.env.BUSINESS_NAME || 'Pro Signature Unisex Salon',
-    tagline: process.env.BUSINESS_TAGLINE || 'Your Look, Our Signature',
-    gstin: process.env.BUSINESS_GSTIN || '',
-    terminal: process.env.POS_TERMINAL || '',
-    register: process.env.POS_REGISTER || '',
-    cashFloat: Number(process.env.POS_CASH_FLOAT) || 0,
-    gstRate: GST_RATE,
-    opensAt: toClock(opensAt),
-    closesAt: toClock(closesAt),
-    loyaltyStarsForFree: STARS_FOR_FREE,
-  });
+app.get('/api/config', async (req, res) => {
+  try {
+    const settings = await getStoreSettings();
+    const store = publicStorePayload(settings);
+    res.json({
+      ...store,
+      terminal: process.env.POS_TERMINAL || '',
+      register: process.env.POS_REGISTER || '',
+      cashFloat: Number(process.env.POS_CASH_FLOAT) || 0,
+      gstRate: GST_RATE,
+      loyaltyStarsForFree: STARS_FOR_FREE,
+    });
+  } catch (err) {
+    console.error('Config failed:', err.message);
+    res.status(500).json({ message: 'Something went wrong. Please try again later.' });
+  }
 });
 
 app.get('/api/public/landing-images', async (req, res) => {
@@ -124,6 +128,7 @@ app.use('/api/purchases', requireAuth, requireRole('admin'), purchasesRouter);
 app.use('/api/reports', requireAuth, requireRole('admin'), reportsRouter);
 app.use('/api/landing-images/upload', requireAuth, requireRole('admin'), landingUploadRouter);
 app.use('/api/landing-images', requireAuth, requireRole('admin'), landingImagesRouter);
+app.use('/api/store-settings', requireAuth, requireRole('admin'), storeSettingsRouter);
 
 if (serveClient) {
   app.use(express.static(clientDir, { index: false, maxAge: '1h' }));

@@ -3,7 +3,8 @@ const db = require('../db');
 const { GST_RATE } = require('../billing');
 const { HttpError } = require('../errors');
 const { normalizePhone } = require('../loyalty');
-const { closesAt, opensAt, toClock, toDisplayTime } = require('../salonHours');
+const { toClock, toDisplayTime } = require('../salonHours');
+const { getStoreSettings, hoursForDate, publicStorePayload } = require('../storeSettings');
 const { inTransaction } = require('../transaction');
 const { date, number, text, time } = require('../validation');
 const { INACTIVE_STATUSES, findAppointment, scheduleBooking } = require('./appointments');
@@ -73,8 +74,14 @@ function assertBookableDay(day) {
 }
 
 /** First slot that can still be booked online, on the half-hour grid from opening time. */
-function firstSlot(day) {
+async function dayHours(day) {
+  const settings = await getStoreSettings();
+  return hoursForDate(settings, day);
+}
+
+async function firstSlot(day) {
   const { today, minutes } = salonNow();
+  const { opensAt } = await dayHours(day);
   const earliest = day === today ? Math.max(opensAt, minutes + LEAD_MINUTES) : opensAt;
   return opensAt + Math.ceil((earliest - opensAt) / SLOT_STEP) * SLOT_STEP;
 }
@@ -119,9 +126,10 @@ router.get('/options', async (req, res) => {
     'SELECT id, name, designation FROM employees WHERE is_active = 1 ORDER BY name',
   );
   const { today } = salonNow();
+  const settings = await getStoreSettings();
+  const store = publicStorePayload(settings, { today });
   res.json({
-    opensAt: toClock(opensAt),
-    closesAt: toClock(closesAt),
+    ...store,
     today,
     lastDay: lastBookableDay(today),
     maxServices: MAX_SERVICES,
@@ -145,15 +153,23 @@ router.get('/availability', async (req, res) => {
     [day, INACTIVE_STATUSES],
   );
 
+  const { opensAt, closesAt } = await dayHours(day);
+  const earliestSlot = await firstSlot(day);
   const slots = [];
-  for (let start = firstSlot(day); start + duration <= closesAt; start += SLOT_STEP) {
+  for (let start = earliestSlot; start + duration <= closesAt; start += SLOT_STEP) {
     const end = start + duration;
     const free = specialists
       .filter((s) => !booked.some((b) => b.employeeId === s.id && b.start < end && b.end > start))
       .map((s) => s.id);
     if (free.length > 0) slots.push({ time: toClock(start), specialistIds: free });
   }
-  res.json({ date: day, duration, slots });
+  res.json({
+    date: day,
+    duration,
+    opensAt: toClock(opensAt),
+    closesAt: toClock(closesAt),
+    slots,
+  });
 });
 
 router.post('/bookings', limitBookings, async (req, res) => {
@@ -172,7 +188,9 @@ router.post('/bookings', limitBookings, async (req, res) => {
   const notes = text(body.notes, 'Notes', { max: 500 });
 
   assertBookableDay(day);
-  if (start < firstSlot(day) || (start - opensAt) % SLOT_STEP !== 0) {
+  const { opensAt, closesAt } = await dayHours(day);
+  const earliestSlot = await firstSlot(day);
+  if (start < earliestSlot || (start - opensAt) % SLOT_STEP !== 0) {
     throw new HttpError(400, 'That time is no longer available. Please choose another slot.');
   }
   const { services, duration } = await findServices(serviceIds);

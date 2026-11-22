@@ -1,6 +1,7 @@
 const express = require('express');
 const db = require('../db');
 const { isAdmin, requireRole } = require('../auth');
+const { hardDelete } = require('../hardDelete');
 const { HttpError } = require('../errors');
 const { number, text } = require('../validation');
 
@@ -73,6 +74,11 @@ router.put('/:id', requireRole('admin'), async (req, res) => {
     return res.status(404).json({ message: 'Landing image not found.' });
   }
   res.json({ image: await findImage(req.params.id, true) });
+});
+
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  await hardDelete('landing_images', req.params.id, 'Landing image');
+  res.json({ ok: true });
 });
 
 module.exports = router;

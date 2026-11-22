@@ -2,8 +2,9 @@ const express = require('express');
 const db = require('../db');
 const { HttpError } = require('../errors');
 const { STARS_FOR_FREE, normalizePhone } = require('../loyalty');
-const { activeMembership } = require('../membership');
-const { date, text } = require('../validation');
+const { activeMembership, addMembership, previewMembershipDates } = require('../membership');
+const { date, number, text } = require('../validation');
+const { inTransaction } = require('../transaction');
 
 const router = express.Router();
 
@@ -11,7 +12,7 @@ const LIST_LIMIT = 2000;
 const GENDERS = ['female', 'male', 'other'];
 
 const customerColumns = `c.id, c.name, c.phone, c.email, c.gender,
-  DATE_FORMAT(c.birthday, '%Y-%m-%d') AS birthday, c.notes, c.stars,
+  DATE_FORMAT(c.birthday, '%Y-%m-%d') AS birthday, c.location, c.notes, c.stars,
   c.free_services_redeemed AS freeServicesRedeemed, c.created_at AS createdAt`;
 
 function parseCustomer(body = {}) {
@@ -34,6 +35,7 @@ function parseCustomer(body = {}) {
     email,
     gender,
     birthday,
+    location: text(body.location, 'Location', { max: 120 }),
     notes: text(body.notes, 'Notes', { max: 1000 }),
   };
 }
@@ -147,6 +149,76 @@ router.post('/', async (req, res) => {
   res.status(201).json({ customer: await findCustomer(result.insertId) });
 });
 
+/** Sell a membership to an existing customer, or create the customer first. */
+router.post('/assign-membership', async (req, res) => {
+  const body = req.body ?? {};
+  const planId = number(body.planId, 'Membership plan', { required: true, integer: true, min: 1 });
+  const note = text(body.note, 'Note', { max: 255 });
+  let customerId = number(body.customerId, 'Customer', { integer: true, min: 1 });
+
+  const [[plan]] = await db.query(
+    `SELECT id, name, price, duration_days AS durationDays, discount_percent AS discountPercent, is_active AS isActive
+     FROM membership_plans WHERE id = ?`,
+    [planId],
+  );
+  if (!plan || !plan.isActive) {
+    throw new HttpError(400, 'Choose an active membership plan.');
+  }
+
+  const result = await inTransaction(async (conn) => {
+    if (!customerId) {
+      const customer = parseCustomer(body);
+      await assertPhoneFree(customer.phone);
+      const [created] = await conn.query('INSERT INTO customers SET ?', [customer]);
+      customerId = created.insertId;
+    } else {
+      const [[existing]] = await conn.query('SELECT id FROM customers WHERE id = ?', [customerId]);
+      if (!existing) {
+        throw new HttpError(404, 'Customer not found.');
+      }
+    }
+
+    const dates = await previewMembershipDates(conn, customerId, plan.durationDays);
+    const inserted = await addMembership(conn, {
+      customerId,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        discountPercent: Number(plan.discountPercent),
+        durationDays: plan.durationDays,
+        price: Number(plan.price),
+        rate: Number(plan.price),
+      },
+      invoiceId: null,
+      pricePaid: Number(plan.price),
+    });
+    if (note) {
+      await conn.query(
+        `UPDATE customers SET notes = TRIM(CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE '\n' END, ?))
+         WHERE id = ?`,
+        [`Membership ${plan.name} added ${dates.startDate}–${dates.endDate}. ${note}`, customerId],
+      );
+    }
+    return {
+      membership: {
+        id: inserted.id,
+        planId: plan.id,
+        planName: plan.name,
+        discountPercent: Number(plan.discountPercent),
+        pricePaid: Number(plan.price),
+        startDate: dates.startDate,
+        endDate: dates.endDate,
+      },
+      customerId,
+    };
+  });
+
+  res.status(201).json({
+    membership: result.membership,
+    customer: await findCustomer(result.customerId),
+  });
+});
+
 router.put('/:id', async (req, res) => {
   const customer = parseCustomer(req.body);
   await assertPhoneFree(customer.phone, req.params.id);
@@ -155,6 +227,94 @@ router.put('/:id', async (req, res) => {
     throw new HttpError(404, 'Customer not found.');
   }
   res.json({ customer: await findCustomer(req.params.id) });
+});
+
+/** Assign a membership plan to a customer outside Billing/POS. */
+router.post('/:id/memberships', async (req, res) => {
+  const customerId = number(req.params.id, 'Customer', { required: true, integer: true, min: 1 });
+  const planId = number(req.body?.planId, 'Membership plan', { required: true, integer: true, min: 1 });
+  const note = text(req.body?.note, 'Note', { max: 255 });
+
+  const customer = await findCustomer(customerId);
+  if (!customer) {
+    throw new HttpError(404, 'Customer not found.');
+  }
+
+  const [[plan]] = await db.query(
+    `SELECT id, name, price, duration_days AS durationDays, discount_percent AS discountPercent, is_active AS isActive
+     FROM membership_plans WHERE id = ?`,
+    [planId],
+  );
+  if (!plan || !plan.isActive) {
+    throw new HttpError(400, 'Choose an active membership plan.');
+  }
+
+  const membership = await inTransaction(async (conn) => {
+    const dates = await previewMembershipDates(conn, customerId, plan.durationDays);
+    const inserted = await addMembership(conn, {
+      customerId,
+      plan: {
+        id: plan.id,
+        name: plan.name,
+        discountPercent: Number(plan.discountPercent),
+        durationDays: plan.durationDays,
+        price: Number(plan.price),
+        rate: Number(plan.price),
+      },
+      invoiceId: null,
+      pricePaid: Number(plan.price),
+    });
+    if (note) {
+      await conn.query(
+        `UPDATE customers SET notes = TRIM(CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE '\n' END, ?))
+         WHERE id = ?`,
+        [`Membership ${plan.name} added ${dates.startDate}–${dates.endDate}. ${note}`, customerId],
+      );
+    }
+    return {
+      id: inserted.id,
+      planId: plan.id,
+      planName: plan.name,
+      discountPercent: Number(plan.discountPercent),
+      pricePaid: Number(plan.price),
+      startDate: dates.startDate,
+      endDate: dates.endDate,
+    };
+  });
+
+  res.status(201).json({
+    membership,
+    customer: await findCustomer(customerId),
+  });
+});
+
+router.get('/:id/membership-preview', async (req, res) => {
+  const customerId = number(req.params.id, 'Customer', { required: true, integer: true, min: 1 });
+  const planId = number(req.query.planId, 'Membership plan', { required: true, integer: true, min: 1 });
+  const customer = await findCustomer(customerId);
+  if (!customer) {
+    throw new HttpError(404, 'Customer not found.');
+  }
+  const [[plan]] = await db.query(
+    `SELECT id, name, price, duration_days AS durationDays, discount_percent AS discountPercent, is_active AS isActive
+     FROM membership_plans WHERE id = ?`,
+    [planId],
+  );
+  if (!plan || !plan.isActive) {
+    throw new HttpError(400, 'Choose an active membership plan.');
+  }
+  const dates = await previewMembershipDates(db, customerId, plan.durationDays);
+  res.json({
+    plan: {
+      id: plan.id,
+      name: plan.name,
+      price: Number(plan.price),
+      durationDays: plan.durationDays,
+      discountPercent: Number(plan.discountPercent),
+    },
+    ...dates,
+    activeMembership: customer.membership,
+  });
 });
 
 module.exports = router;

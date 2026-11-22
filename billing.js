@@ -7,7 +7,7 @@ const round2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
 const formatRupees = (value) => `₹${value.toLocaleString('en-IN')}`;
 
 const ITEM_COLUMNS = {
-  services: 'id, name, category, duration_minutes, price',
+  services: 'id, name, category, duration_minutes, price, membership_price',
   products: 'id, name, brand, size, price, stock',
   membership_plans: 'id, name, duration_days, discount_percent, price',
 };
@@ -32,8 +32,8 @@ function normalizeItems(items) {
   });
 
   const memberships = normalized.filter((item) => item.type === 'membership');
-  if (memberships.length > 1 || memberships.some((item) => item.quantity > 1)) {
-    throw new HttpError(400, 'A bill can include only one membership.');
+  if (memberships.length > 0) {
+    throw new HttpError(400, 'Memberships are sold from Sell Membership, not on a bill.');
   }
   return normalized;
 }
@@ -136,11 +136,38 @@ async function priceFolio(
   const services = rowsByType.service;
   const products = rowsByType.product;
 
+  // Memberships are sold from Sell Membership; POS only uses an active plan.
+  const member = activeMembership
+    ? {
+        name: activeMembership.planName,
+        discountPercent: Number(activeMembership.discountPercent) || 0,
+      }
+    : null;
+
+  function serviceRate(row) {
+    const listPrice = Number(row.price);
+    if (!member) return listPrice;
+    const memberPrice =
+      row.membership_price != null && row.membership_price !== ''
+        ? Number(row.membership_price)
+        : null;
+    if (memberPrice != null && Number.isFinite(memberPrice)) {
+      return Math.min(listPrice, memberPrice);
+    }
+    if (member.discountPercent > 0) {
+      return round2(listPrice * (1 - member.discountPercent / 100));
+    }
+    return listPrice;
+  }
+
   const lines = items.map((item) => {
     const row = rowsByType[item.type].get(item.id);
     if (!row) {
       throw new HttpError(400, `That ${item.type} is no longer available.`);
     }
+
+    const listRate = Number(row.price);
+    const rate = item.type === 'service' ? serviceRate(row) : listRate;
 
     return {
       type: item.type,
@@ -148,8 +175,9 @@ async function priceFolio(
       name: row.name,
       detail: lineDetail(item.type, row),
       quantity: item.quantity,
-      rate: row.price,
-      lineTotal: round2(row.price * item.quantity),
+      rate,
+      listRate,
+      lineTotal: round2(rate * item.quantity),
       ...(item.type === 'product' && { stock: row.stock }),
       ...(item.type === 'membership' && {
         durationDays: row.duration_days,
@@ -191,24 +219,26 @@ async function priceFolio(
   }
   const loyaltyDiscount = freeService?.value ?? 0;
 
-  const soldPlan = lines.find((l) => l.type === 'membership');
-  const member = activeMembership
-    ? { name: activeMembership.planName, discountPercent: Number(activeMembership.discountPercent) }
-    : soldPlan
-      ? { name: soldPlan.name, discountPercent: Number(soldPlan.discountPercent) }
-      : null;
-  const serviceValue = lines.filter((l) => l.type === 'service').reduce((sum, l) => sum + l.lineTotal, 0);
+  // Savings vs list price (for records). Rates already use membership amounts, so do not
+  // subtract this again from the payable total.
   const membershipDiscount = member
-    ? round2(((serviceValue - loyaltyDiscount) * member.discountPercent) / 100)
+    ? round2(
+        lines
+          .filter((line) => line.type === 'service' && !(freeService && freeService.id === line.id))
+          .reduce((sum, line) => sum + Math.max(0, line.listRate - line.rate) * line.quantity, 0),
+      )
     : 0;
-  const payable = round2(subtotal - loyaltyDiscount - membershipDiscount);
+  const payable = round2(subtotal - loyaltyDiscount);
 
   const code = typeof rawCouponCode === 'string' ? rawCouponCode.trim().toUpperCase() : '';
   const { coupon, error: couponError } = code ? await findCoupon(conn, code, payable) : {};
 
   const discount = coupon ? calculateDiscount(coupon, payable) : 0;
   const taxableValue = round2(payable - discount);
+  // One loyalty star per settled bill that includes at least one paid service
+  // (free redeemed service alone does not earn a star).
   const serviceUnits = lines.filter((l) => l.type === 'service').reduce((sum, l) => sum + l.quantity, 0);
+  const paidServiceUnits = serviceUnits - (freeService ? 1 : 0);
   const cgst = round2((taxableValue * GST_RATE) / 200);
   const sgst = cgst;
 
@@ -219,7 +249,7 @@ async function priceFolio(
     couponError: couponError ?? null,
     freeService,
     membership: member,
-    starsEarned: serviceUnits - (freeService ? 1 : 0),
+    starsEarned: paidServiceUnits > 0 ? 1 : 0,
     totals: {
       subtotal,
       loyaltyDiscount,
