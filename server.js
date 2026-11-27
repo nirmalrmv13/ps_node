@@ -15,8 +15,10 @@ const inventoryRouter = require('./routes/inventory');
 const customersRouter = require('./routes/customers');
 const { STARS_FOR_FREE } = require('./loyalty');
 const { getStoreSettings, publicStorePayload } = require('./storeSettings');
+const { isWhatsAppConfigured } = require('./whatsapp');
 const storeSettingsRouter = require('./routes/storeSettings');
 const invoicesRouter = require('./routes/invoices');
+const { servePublicInvoicePdf } = invoicesRouter;
 const membershipPlansRouter = require('./routes/membershipPlans');
 const suppliersRouter = require('./routes/suppliers');
 const purchasesRouter = require('./routes/purchases');
@@ -91,6 +93,8 @@ app.get('/api/config', async (req, res) => {
       cashFloat: Number(process.env.POS_CASH_FLOAT) || 0,
       gstRate: GST_RATE,
       loyaltyStarsForFree: STARS_FOR_FREE,
+      /** True when GETECHO_API_KEY is set (GetEcho WA Gateway). */
+      whatsappAutoSend: isWhatsAppConfigured(),
     });
   } catch (err) {
     console.error('Config failed:', err.message);
@@ -113,6 +117,13 @@ app.get('/api/public/landing-images', async (req, res) => {
   }
 });
 
+app.get('/api/public/invoices/:id/pdf', async (req, res, next) => {
+  try {
+    await servePublicInvoicePdf(req, res);
+  } catch (err) {
+    next(err);
+  }
+});
 app.use('/api/public', publicBookingRouter);
 app.use('/api/services', requireAuth, servicesRouter);
 app.use('/api/products', requireAuth, productsRouter);

@@ -7,8 +7,17 @@ const { activeMembership, addMembership } = require('../membership');
 const { date, number, text } = require('../validation');
 const { buildInvoicePdf } = require('../invoicePdf');
 const { getStoreSettings } = require('../storeSettings');
+const { sendInvoiceWhatsApp, verifyInvoicePdfShareToken } = require('../whatsapp');
 
 const router = express.Router();
+
+async function deliverInvoiceWhatsApp(invoice) {
+  const store = await getStoreSettings();
+  return sendInvoiceWhatsApp(invoice, {
+    businessName: store.businessName,
+    gstin: store.gstin,
+  });
+}
 
 async function lockAppointmentForBilling(conn, appointmentId, folio) {
   const [[appointment]] = await conn.query(
@@ -335,14 +344,20 @@ router.post('/', async (req, res) => {
   }
 
   const invoice = await loadInvoice(invoiceId);
-  res.status(201).json({ invoice });
+  const whatsapp = await deliverInvoiceWhatsApp(invoice);
+  res.status(201).json({ invoice, whatsapp });
 });
 
-router.get('/:id/pdf', async (req, res) => {
+router.post('/:id/whatsapp', async (req, res) => {
   const invoice = await loadInvoice(req.params.id);
   if (!invoice) {
     return res.status(404).json({ message: 'Invoice not found.' });
   }
+  const whatsapp = await deliverInvoiceWhatsApp(invoice);
+  res.json({ whatsapp });
+});
+
+async function sendInvoicePdfResponse(res, invoice) {
   const store = await getStoreSettings();
   const pdf = await buildInvoicePdf(invoice, {
     businessName: store.businessName,
@@ -350,9 +365,31 @@ router.get('/:id/pdf', async (req, res) => {
   });
   const filename = `${invoice.invoiceNumber || `invoice-${invoice.id}`}.pdf`;
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
   res.send(pdf);
+}
+
+router.get('/:id/pdf', async (req, res) => {
+  const invoice = await loadInvoice(req.params.id);
+  if (!invoice) {
+    return res.status(404).json({ message: 'Invoice not found.' });
+  }
+  await sendInvoicePdfResponse(res, invoice);
 });
+
+/** Public short-lived PDF for GetEcho document fetch (?token=…). */
+async function servePublicInvoicePdf(req, res) {
+  const token = String(req.query.token || '');
+  const invoiceId = req.params.id;
+  if (!verifyInvoicePdfShareToken(token, invoiceId)) {
+    return res.status(401).json({ message: 'Invalid or expired invoice link.' });
+  }
+  const invoice = await loadInvoice(invoiceId);
+  if (!invoice) {
+    return res.status(404).json({ message: 'Invoice not found.' });
+  }
+  await sendInvoicePdfResponse(res, invoice);
+}
 
 router.get('/:id', async (req, res) => {
   const invoice = await loadInvoice(req.params.id);
@@ -363,3 +400,4 @@ router.get('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.servePublicInvoicePdf = servePublicInvoicePdf;
